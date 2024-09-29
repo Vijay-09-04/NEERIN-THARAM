@@ -1,1 +1,215 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h> // Include the library for I2C LCD
+
+// Initialize the LCD with the I2C address (usually 0x27 or 0x3F)
+LiquidCrystal_I2C lcd(0x27, 16, 2); // 16 columns and 2 rows LCD
+
+// Define color sensor pins
+#define S0 3
+#define S1 4
+#define S2 5
+#define S3 6
+#define sensorOut 7
+#define ledPin A0  // Define the pin for the LED
+#define motorPin 10 // Define pin for the motor/actuator
+
+// Calibration Values
+const uint8_t redMin = 29; // Red minimum value
+const uint8_t redMax = 191; // Red maximum value
+const uint8_t greenMin = 33; // Green minimum value
+const uint8_t greenMax = 250; // Green maximum value
+const uint8_t blueMin = 25; // Blue minimum value
+const uint8_t blueMax = 216; // Blue maximum value
+
+// Variables for Color Pulse Width Measurements
+int redPW = 0;
+int greenPW = 0;
+int bluePW = 0;
+
+// Variables for final Color values
+uint8_t redValue;
+uint8_t greenValue;
+uint8_t blueValue;
+
+void setup() {
+  // Set S0 - S3 as outputs
+  pinMode(S0, OUTPUT);
+  pinMode(S1, OUTPUT);
+  pinMode(S2, OUTPUT);
+  pinMode(S3, OUTPUT);
+
+  // Set Sensor output as input
+  pinMode(sensorOut, INPUT);
+
+  // Set Frequency scaling to 20%
+  digitalWrite(S0, HIGH);
+  digitalWrite(S1, LOW);
+
+  // Set the LED and motor pins as output and turn them off
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);  // Turn the LED off
+  pinMode(motorPin, OUTPUT);
+  digitalWrite(motorPin, LOW); // Turn the motor off
+
+  // Setup Serial Monitor
+  Serial.begin(9600);
+
+  // Initialize the LCD
+  lcd.begin();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Initializing...");
+
+  // Initial wait for 10 seconds after startup
+  delay(10000);  // Wait for 10 seconds
+
+  // Actuate motor (connected to pin D10) for 45 seconds
+  digitalWrite(motorPin, HIGH); // Turn the motor on
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Motor On...");
+  delay(45000);  // Wait for 45 seconds
+  digitalWrite(motorPin, LOW);  // Turn the motor off
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Motor Off");
+
+  // Wait for an additional 15 seconds before starting color detection
+  delay(15000);  // Wait for 15 seconds
+}
+
+void loop() {
+  // Read Red value
+  redPW = getRedPW();
+  // Map to value from 0-255
+  redValue = map(redPW, redMin, redMax, 255, 0);
+
+  // Delay to stabilize sensor
+  delay(200);
+
+  // Read Green value
+  greenPW = getGreenPW();
+  // Map to value from 0-255
+  greenValue = map(greenPW, greenMin, greenMax, 255, 0);
+
+  // Delay to stabilize sensor
+  delay(200);
+
+  // Read Blue value
+  bluePW = getBluePW();
+  // Map to value from 0-255
+  blueValue = map(bluePW, blueMin, blueMax, 255, 0);
+
+  // Delay to stabilize sensor
+  delay(200);
+
+  predictColour(redValue, greenValue, blueValue);
+  checkChlorineConcentration(redValue, greenValue, blueValue);
+}
+
+// Send RGB Values in CSV format over Serial to PC Program running Colour Classifier
+void predictColour(int redVal, int greenVal, int blueVal) {
+  Serial.print(redVal); 
+  Serial.print(","); 
+  Serial.print(greenVal); 
+  Serial.print(","); 
+  Serial.println(blueVal);
+
+  // Display RGB values on the LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("R:");
+  lcd.print(redVal);
+  lcd.setCursor(8, 0);
+  lcd.print("G:");
+  lcd.print(greenVal);
+  lcd.setCursor(0, 1);
+  lcd.print("B:");
+  lcd.print(blueVal);
+}
+
+// Function to read Red Pulse Widths
+int getRedPW() {
+  digitalWrite(S2, LOW);
+  digitalWrite(S3, LOW);
+  
+  int PW;
+  int avg = 0;
+  const int avgPoints = 25;
+  
+  for (int i = 0; i < avgPoints; ++i) {
+    PW = pulseIn(sensorOut, LOW);
+    if (PW > redMax) PW = redMax;
+    if (PW < redMin) PW = redMin;
+    avg += PW;
+  }
+  
+  return (int)(avg / avgPoints);
+}
+
+// Function to read Green Pulse Widths
+int getGreenPW() {
+  digitalWrite(S2, HIGH);
+  digitalWrite(S3, HIGH);
+
+  int PW;
+  int avg = 0;
+  const int avgPoints = 25;
+  
+  for (int i = 0; i < avgPoints; ++i) {
+    PW = pulseIn(sensorOut, LOW);
+    if (PW > greenMax) PW = greenMax;
+    if (PW < greenMin) PW = greenMin;
+    avg += PW;
+  }
+  
+  return (int)(avg / avgPoints); 
+}
+
+// Function to read Blue Pulse Widths
+int getBluePW() {
+  digitalWrite(S2, LOW);
+  digitalWrite(S3, HIGH);
+  
+  int PW;
+  int avg = 0;
+  const int avgPoints = 25;
+  
+  for (int i = 0; i < avgPoints; ++i) {
+    PW = pulseIn(sensorOut, LOW);
+    if (PW > blueMax) PW = blueMax;
+    if (PW < blueMin) PW = blueMin;
+    avg += PW;
+  }
+  
+  return (int)(avg / avgPoints);
+}
+
+// Function to check Chlorine Concentration based on RGB values
+void checkChlorineConcentration(int redVal, int greenVal, int blueVal) {
+  String concentrationMessage;
+  
+  if (redVal >= 255 && greenVal >= 230 && blueVal >= 230) {
+    concentrationMessage = "Low Chlorine (0.0 mg/L)";
+    Serial.println(concentrationMessage);
+  } else if (redVal >= 255 && greenVal >= 180 && blueVal >= 180) {
+    concentrationMessage = "Moderate Chlorine (0.5 mg/L)";
+    Serial.println(concentrationMessage);
+  } else if (redVal >= 255 && greenVal >= 100 && blueVal >= 100) {
+    concentrationMessage = "Higher Chlorine (1.0 mg/L)";
+    Serial.println(concentrationMessage);
+  } else if (redVal >= 200 && greenVal >= 0 && blueVal >= 200) {
+    concentrationMessage = "Very High Chlorine (2.0+ mg/L)";
+    Serial.println(concentrationMessage);
+  } else {
+    concentrationMessage = "No Chlorine Detected";
+    Serial.println(concentrationMessage);
+  }
+
+  // Display concentration on the LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(concentrationMessage);
+}
 
